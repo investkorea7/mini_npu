@@ -20,6 +20,21 @@ def normalize_label(label):
         return 'X'
     return label
 
+def validate_matrix(matrix, expected_size):
+    if not isinstance(matrix, list):
+        return False
+
+    if len(matrix) != expected_size:
+        return False
+
+    for row in matrix:
+        if not isinstance(row, list):
+            return False
+
+        if len(row) != expected_size:
+            return False
+
+    return True
 
 # --- [Step 3] 점수 비교 및 판정 함수 (Epsilon 정책) ---
 def judge_pattern(score_cross, score_x):
@@ -103,26 +118,57 @@ def run_mode_2():
     try:
         with open("data.json", "r", encoding="utf-8") as f:
             data = json.load(f)
+
     except FileNotFoundError:
         print("오류: data.json 파일을 찾을 수 없습니다.")
         return
 
+    except json.JSONDecodeError:
+        print("오류: data.json의 JSON 형식이 올바르지 않습니다.")
+        return
+
     filters_data = data.get("filters", {})
     patterns_data = data.get("patterns", {})
+
+    if not isinstance(filters_data, dict):
+        print("오류: filters 데이터 형식이 올바르지 않습니다.")
+        return
+
+    if not isinstance(patterns_data, dict):
+        print("오류: patterns 데이터 형식이 올바르지 않습니다.")
+        return
 
     print("\n#----------------------------------")
     print("# [1] 필터 로드")
     print("#----------------------------------")
     loaded_filters = {}
     for size_key, f_dict in filters_data.items():
-        # size_5 -> 5 추출
-        size_num = int(size_key.split("_")[1])
+        if not isinstance(size_key, str) or not size_key.startswith("size_"):
+            print(f"⚠ 필터 키 형식 오류: {size_key}")
+            continue
+
+        try:
+            size_num = int(size_key.split("_")[1])
+        except (IndexError, ValueError):
+            print(f"⚠ 필터 크기 해석 실패: {size_key}")
+            continue
+
+        if not isinstance(f_dict, dict):
+            print(f"⚠ {size_key} 필터 데이터 형식 오류")
+            continue
+
         cross_f = f_dict.get("cross") or f_dict.get("Cross") or f_dict.get("+")
         x_f = f_dict.get("x") or f_dict.get("X")
+
+        if cross_f is None or x_f is None:
+            print(f"⚠ {size_key} 필터에 Cross 또는 X 데이터가 없습니다.")
+            continue
+
         loaded_filters[size_num] = {
             "Cross": cross_f,
             "X": x_f
         }
+
         print(f"✓ {size_key} 필터 로드 완료 (Cross, X)")
 
     print("\n#----------------------------------")
@@ -139,31 +185,87 @@ def run_mode_2():
 
     for pat_key, pat_info in patterns_data.items():
         total_tests += 1
-        # size_5_1 -> 5
-        size_num = int(pat_key.split("_")[1])
+
+        if not isinstance(pat_key, str) or not pat_key.startswith("size_"):
+            failed_tests += 1
+            fail_details.append(f"- {pat_key}: 패턴 키 형식 오류로 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (패턴 키 형식 오류)")
+            continue
+
+        try:
+            size_num = int(pat_key.split("_")[1])
+        except (IndexError, ValueError):
+            failed_tests += 1
+            fail_details.append(f"- {pat_key}: 패턴 크기 해석 실패로 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (패턴 크기 해석 오류)")
+            continue
+
+        if not isinstance(pat_info, dict):
+            failed_tests += 1
+            fail_details.append(f"- {pat_key}: 패턴 데이터 형식 오류로 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (패턴 데이터 형식 오류)")
+            continue
+
         pattern_grid = pat_info.get("input")
         raw_expected = pat_info.get("expected")
         expected_label = normalize_label(raw_expected)
 
-        # 크기 및 데이터 검증
-        if size_num not in loaded_filters or not pattern_grid:
+        if expected_label not in ("Cross", "X"):
             failed_tests += 1
-            fail_details.append(f"- {pat_key}: 데이터 또는 필터 소실로 FAIL")
-            print(f"--- {pat_key}\n판정: FAIL (데이터 오류)")
+            fail_details.append(f"- {pat_key}: expected 라벨 오류로 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (expected 라벨 오류)")
+            continue
+
+                # 크기 및 데이터 검증
+        if size_num not in loaded_filters:
+            failed_tests += 1
+            fail_details.append(f"- {pat_key}: 해당 크기의 필터가 없어 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (필터 없음)")
             continue
 
         cross_filter = loaded_filters[size_num]["Cross"]
         x_filter = loaded_filters[size_num]["X"]
 
-        # 연산 시간 측정 (10회 평균)
+        if not validate_matrix(pattern_grid, size_num):
+            failed_tests += 1
+            fail_details.append(
+                f"- {pat_key}: 패턴 크기가 {size_num}x{size_num} 형식이 아니어서 FAIL"
+            )
+            print(f"--- {pat_key}")
+            print(f"판정: FAIL (패턴 크기 오류: {size_num}x{size_num} 필요)")
+            continue
+
+        if not validate_matrix(cross_filter, size_num):
+            failed_tests += 1
+            fail_details.append(f"- {pat_key}: Cross 필터 크기 오류로 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (Cross 필터 크기 오류)")
+            continue
+
+        if not validate_matrix(x_filter, size_num):
+            failed_tests += 1
+            fail_details.append(f"- {pat_key}: X 필터 크기 오류로 FAIL")
+            print(f"--- {pat_key}")
+            print("판정: FAIL (X 필터 크기 오류)")
+            continue
+       
+        # 연산 시간 측정 (MAC 1회 기준, 10회 평균)
         start_t = time.perf_counter()
         for _ in range(10):
-            score_cross = calculate_mac(pattern_grid, cross_filter, size_num)
-            score_x = calculate_mac(pattern_grid, x_filter, size_num)
+            calculate_mac(pattern_grid, cross_filter, size_num)
         end_t = time.perf_counter()
-        
+
         avg_ms = ((end_t - start_t) / 10) * 1000
         time_records[size_num].append(avg_ms)
+
+        # 실제 판정용 점수 계산
+        score_cross = calculate_mac(pattern_grid, cross_filter, size_num)
+        score_x = calculate_mac(pattern_grid, x_filter, size_num)
 
         judgment = judge_pattern(score_cross, score_x)
 
